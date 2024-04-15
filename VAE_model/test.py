@@ -12,6 +12,7 @@ from flax import linen as nn
 import pandas as pd
 
 from AE import AutoEncoder, Encoder, Decoder
+from train import train_step
 
 # Matt's plotting params
 # ---------------------------------------------- #
@@ -92,39 +93,9 @@ def loss(params, X_hat):
 print(loss(params, X_hat))
 
 
-# training function
-def train(
-    X: jnp.array,
-    optimizer: optax._src.base.GradientTransformation,
-    model: nn.Module,
-    key_param: jax.random.PRNGKey,
-    n_iter: int = 500,
-    print_every: int = 10,
-):
-    loss_array = np.zeros(n_iter)
-
-    def loss(params, X):
-        X_hat = model.apply(params, X)
-        #return 2 * optax.l2_loss(X_hat, X).mean()
-        return optax.squared_error(X_hat, X).mean()
-
-    params = model.init(key_param, X)
-    opt_state = optimizer.init(params)
-    loss_grad_fn = jax.value_and_grad(loss)
-
-    for i in range(n_iter):
-        loss_val, grads = loss_grad_fn(params, X)
-        loss_array[i] = loss_val.item()
-        updates, opt_state = optimizer.update(grads, opt_state)
-        params = optax.apply_updates(params, updates)
-        if i % print_every == 0:
-            print("Loss step {}: ".format(i), loss_val)
-    return params, loss_array
-
-
-optimized_params, loss_array = train(
+optimized_params, loss_array = train_step(
     X,
-    optax.adam(learning_rate=0.05),
+    optax.adam(learning_rate=0.02),
     ae,
     jax.random.PRNGKey(0),
     n_iter=500,
