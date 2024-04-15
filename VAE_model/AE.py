@@ -15,6 +15,7 @@ class Encoder(nn.Module):
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(5)(x)
+        #x = nn.selu(x)
         x = nn.selu(x)
         x = nn.Dense(features=self.bottleneck)(x)
         return x

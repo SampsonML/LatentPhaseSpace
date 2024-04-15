@@ -35,29 +35,27 @@ plt.rcParams["mathtext.fontset"] = "dejavuserif"
 plt.rcParams.update({"text.usetex": True})
 # ---------------------------------------------- #
 
-# making a test example
-X = random.multivariate_normal(
-    key=random.PRNGKey(0),
-    shape=(100,),
-    mean=jnp.array([1, 3]),
-    cov=jnp.array([[1.0, -0.5], [-0.5, 2.0]]),
-)
-
-
-# plot this data
-plt.scatter(X[:, 0], X[:, 1])
+# load up a trial of the spring data
+path = "/Users/mattsampson/Research/PrincetonThesis/LatentDynamicalModel/hamiltonianGenerator/spring_data/"
+trial = "trial_k2_m2.npy"
+data = np.load(path + trial, allow_pickle=True)
+data = data.T
+plt.scatter(data[:, 0], data[:, 1])
+plt.title("Spring data")
 plt.show()
 
+# create a copy of the data
+X = data.copy()
+bn = 10  # bottleneck size: the amount of latent variables
 
-enc = Encoder(bottleneck=1)
+enc = Encoder(bottleneck=bn)
 dec = Decoder(out=2)
 
 params_enc = enc.init(random.PRNGKey(0), X)
 X_bottlenecked = enc.apply(params_enc, X)
 
-bottleneck_size = 1
 out_size = X.shape[1]
-ae = AutoEncoder(bottleneck_size, out_size)
+ae = AutoEncoder(bn, out_size)
 
 
 # initialise parameters
@@ -66,10 +64,11 @@ params = ae.init(random.PRNGKey(0), X)
 X_hat = ae.apply(params, X)
 
 # Encoded values/latent representation
-encoded_1d = Encoder(1).apply({"params": params["params"]["encoder"]}, X).flatten()
+encoded_1d = Encoder(bn).apply({"params": params["params"]["encoder"]}, X).flatten()
+
 
 # define plot function
-def plot_2d_reconstruction(X, params, model, trained = False):
+def plot_2d_reconstruction(X, params, model, trained=False):
     X_hat = model.apply(params, X)
     plt.scatter(X[:, 0], X[:, 1], label="Original Data")
     plt.scatter(X_hat[:, 0], X_hat[:, 1], label="Reconstructed Data")
@@ -79,9 +78,9 @@ def plot_2d_reconstruction(X, params, model, trained = False):
         plt.title("Untrained")
     plt.show()
 
+
 # plot the result
 plot_2d_reconstruction(X, params, ae, trained=False)
-
 
 
 # define loss function
@@ -89,7 +88,9 @@ def loss(params, X_hat):
     X_hat = ae.apply(params, X)
     return 2 * optax.l2_loss(X, X_hat).mean()
 
-print( loss(params, X_hat) )
+
+print(loss(params, X_hat))
+
 
 # training function
 def train(
@@ -97,13 +98,15 @@ def train(
     optimizer: optax._src.base.GradientTransformation,
     model: nn.Module,
     key_param: jax.random.PRNGKey,
-    n_iter: int=500,
-    print_every: int=10
+    n_iter: int = 500,
+    print_every: int = 10,
 ):
-    loss_array  = np.zeros(n_iter)
+    loss_array = np.zeros(n_iter)
+
     def loss(params, X):
         X_hat = model.apply(params, X)
-        return 2 * optax.l2_loss(X_hat, X).mean()
+        #return 2 * optax.l2_loss(X_hat, X).mean()
+        return optax.squared_error(X_hat, X).mean()
 
     params = model.init(key_param, X)
     opt_state = optimizer.init(params)
@@ -118,8 +121,14 @@ def train(
             print("Loss step {}: ".format(i), loss_val)
     return params, loss_array
 
+
 optimized_params, loss_array = train(
-    X, optax.adam(learning_rate=0.1), ae, jax.random.PRNGKey(0), n_iter=30
+    X,
+    optax.adam(learning_rate=0.05),
+    ae,
+    jax.random.PRNGKey(0),
+    n_iter=500,
+    print_every=20,
 )
 
 plt.plot(loss_array)
