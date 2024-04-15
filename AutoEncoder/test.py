@@ -1,12 +1,10 @@
 # work from https://nipunbatra.github.io/blog/posts/autoencoder.html
+# for dataloaders see https://www.kaggle.com/code/aakashnain/building-models-in-jax-part2-flax
 import jax
 import jax.numpy as jnp
 import numpy as np
 import optax
-
 import matplotlib.pyplot as plt
-import matplotlib.pyplot as plt
-
 import jax.random as random
 from flax import linen as nn
 import pandas as pd
@@ -16,24 +14,25 @@ from train import train_step
 
 # Matt's plotting params
 # ---------------------------------------------- #
-plt.rcParams["xtick.top"] = True
-plt.rcParams["ytick.right"] = True
-plt.rcParams["xtick.direction"] = "in"
-plt.rcParams["ytick.direction"] = "in"
-plt.rcParams["xtick.minor.visible"] = True
-plt.rcParams["ytick.minor.visible"] = True
-plt.rcParams["xtick.major.size"] = 7
-plt.rcParams["xtick.minor.size"] = 4.5
-plt.rcParams["ytick.major.size"] = 7
-plt.rcParams["ytick.minor.size"] = 4.5
-plt.rcParams["xtick.major.width"] = 2
-plt.rcParams["xtick.minor.width"] = 1.5
-plt.rcParams["ytick.major.width"] = 2
-plt.rcParams["ytick.minor.width"] = 1.5
-plt.rcParams["axes.linewidth"] = 2
-plt.rcParams["font.family"] = "serif"
-plt.rcParams["mathtext.fontset"] = "dejavuserif"
-plt.rcParams.update({"text.usetex": True})
+import matplotlib as mpl
+mpl.rcParams["xtick.top"] = True
+mpl.rcParams["ytick.right"] = True
+mpl.rcParams["xtick.direction"] = "in"
+mpl.rcParams["ytick.direction"] = "in"
+mpl.rcParams["xtick.minor.visible"] = True
+mpl.rcParams["ytick.minor.visible"] = True
+mpl.rcParams["xtick.major.size"] = 7
+mpl.rcParams["xtick.minor.size"] = 4.5
+mpl.rcParams["ytick.major.size"] = 7
+mpl.rcParams["ytick.minor.size"] = 4.5
+mpl.rcParams["xtick.major.width"] = 2
+mpl.rcParams["xtick.minor.width"] = 1.5
+mpl.rcParams["ytick.major.width"] = 2
+mpl.rcParams["ytick.minor.width"] = 1.5
+mpl.rcParams["axes.linewidth"] = 2
+mpl.rcParams["font.family"] = "serif"
+mpl.rcParams["mathtext.fontset"] = "dejavuserif"
+mpl.rcParams.update({"text.usetex": True})
 # ---------------------------------------------- #
 
 # load up a trial of the spring data
@@ -47,26 +46,15 @@ plt.show()
 
 # create a copy of the data
 X = data.copy()
-bn = 12  # bottleneck size: the amount of latent variables
-
-enc = Encoder(bottleneck=bn)
-dec = Decoder(out=2)
-
-params_enc = enc.init(random.PRNGKey(0), X)
-X_bottlenecked = enc.apply(params_enc, X)
-
+bn = 6  # bottleneck size: the amount of latent variables
 out_size = X.shape[1]
-ae = AutoEncoder(bn, out_size)
 
+# instantiate the autoencoder
+ae = AutoEncoder(bn, out_size)
 
 # initialise parameters
 params = ae.init(random.PRNGKey(0), X)
-
 X_hat = ae.apply(params, X)
-
-# Encoded values/latent representation
-encoded_1d = Encoder(bn).apply({"params": params["params"]["encoder"]}, X).flatten()
-
 
 # define plot function
 def plot_2d_reconstruction(X, params, model, trained=False):
@@ -84,15 +72,7 @@ def plot_2d_reconstruction(X, params, model, trained=False):
 plot_2d_reconstruction(X, params, ae, trained=False)
 
 
-# define loss function
-def loss(params, X_hat):
-    X_hat = ae.apply(params, X)
-    return 2 * optax.l2_loss(X, X_hat).mean()
-
-
-print(loss(params, X_hat))
-
-
+# run the model training
 optimized_params, loss_array = train_step(
     X,
     optax.adam(learning_rate=0.05),
@@ -102,9 +82,11 @@ optimized_params, loss_array = train_step(
     print_every=20,
 )
 
+# plot the loss
 plt.plot(loss_array)
 plt.xlabel("Iterations")
 _ = plt.ylabel("Reconstruction loss")
 plt.show()
 
+# plot the result
 plot_2d_reconstruction(X, optimized_params, ae, True)
