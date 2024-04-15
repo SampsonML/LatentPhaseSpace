@@ -47,7 +47,7 @@ plt.show()
 
 # create a copy of the data
 X = data.copy()
-bn = 10  # bottleneck size: the amount of latent variables
+bn = 12  # bottleneck size: the amount of latent variables
 
 enc = Encoder(bottleneck=bn)
 dec = Decoder(out=2)
@@ -95,7 +95,7 @@ print(loss(params, X_hat))
 
 optimized_params, loss_array = train_step(
     X,
-    optax.adam(learning_rate=0.02),
+    optax.adam(learning_rate=0.05),
     ae,
     jax.random.PRNGKey(0),
     n_iter=500,

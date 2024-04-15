@@ -1,6 +1,6 @@
-# ----------------------------------- #
-# The encoder module of the VAE model.#
-# ----------------------------------- #
+# ------------------------------------------ #
+# The architecture of the deep autoencoder   #
+# ------------------------------------------ #
 
 import numpy as np
 import jax.numpy as jnp
@@ -10,6 +10,15 @@ from flax import linen as nn
 
 
 class Encoder(nn.Module):
+    """
+    Inputs
+    ------
+    bottleneck: int - the number of latent variables
+
+    Outputs
+    -------
+    x: jnp.array - the latent variables
+    """
     bottleneck: int
 
     @nn.compact
@@ -21,6 +30,15 @@ class Encoder(nn.Module):
         return x
 
 class Decoder(nn.Module):
+    """
+    Inputs
+    ------
+    out: int - the number of output features
+
+    Outputs
+    -------
+    x: jnp.array - the reconstructed data
+    """
     out: int
 
     @nn.compact
@@ -32,6 +50,16 @@ class Decoder(nn.Module):
 
 
 class AutoEncoder(nn.Module):
+    """
+    Inputs
+    ------
+    bottleneck: int - the number of latent variables
+    out: int - the number of output features
+
+    Outputs
+    -------
+    x_hat: jnp.array - the reconstructed data
+    """
     bottleneck: int
     out: int
     def setup(self):
