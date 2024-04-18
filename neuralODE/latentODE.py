@@ -183,6 +183,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_predator = -d * predator + c * prey * predator
         d_y = jnp.array([d_prey, d_predator])
         return d_y
+
     LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
 
     # --------------------------
@@ -194,6 +195,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         dy2 = -y1 - theta * y2
         d_y = jnp.array([dy1, dy2])
         return d_y
+
     SHO_args = 1  # theta
 
     # --------------------------------------
@@ -279,6 +281,7 @@ def main(
         d_predator = -d * predator + c * prey * predator
         d_y = jnp.array([d_prey, d_predator])
         return d_y
+
     LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
 
     # --------------------------
@@ -290,6 +293,7 @@ def main(
         dy2 = -y1 - theta * y2
         d_y = jnp.array([dy1, dy2])
         return d_y
+
     SHO_args = 1  # theta
 
     # --------------------------------------
@@ -301,6 +305,7 @@ def main(
         dy2 = force * jnp.cos(w * t) - b * y2 - k * y1
         d_y = jnp.array([dy1, dy2])
         return d_y
+
     PFHO_args = (2, 1, 1 / 2, 1)  # w, b, k, force
 
     if func == "LVE":
@@ -495,17 +500,13 @@ def main(
 
 
 # run the code
-main()
-# dataset_size=20000,
-# batch_size=256,
-# lr=1e-2,
-# steps=30,
-# plot_every=10,
-# save_every=10,
-# hidden_size=8,
-# latent_size=2,
-# width_size=8,
-# depth=2,
-# seed=1992,
-# func="PFHO"
-# figname="latentODE.png")
+main(
+    steps=100,
+    plot_every=10,
+    save_every=10,
+    hidden_size=8,
+    latent_size=2,
+    width_size=8,
+    func="PFHO",
+    figname="latentODE.png",
+)
