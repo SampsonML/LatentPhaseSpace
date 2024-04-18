@@ -1,4 +1,5 @@
-# directly from Patrick Kidger
+# LatentODEs testing grounds
+# architecture and template from Patrick Kidger
 # at (https://github.com/patrick-kidger/diffrax/blob/main/examples/latent_ode.ipynb)
 import time
 import diffrax
@@ -10,11 +11,14 @@ import jax.random as jr
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
+from numpy._typing import _32Bit
+from numpy.lib.shape_base import row_stack
 import optax
+import os
 
 # turn on float 64
-from jax import config
-config.update("jax_enable_x64", True)
+# from jax import config
+# config.update("jax_enable_x64", True)
 
 # Matt's plotting params
 # ---------------------------------------------- #
@@ -103,10 +107,14 @@ class LatentODE(eqx.Module):
 
     # Decoder of the VAE
     def _sample(self, ts, latent):
-        dt0 = 0.5  # selected as a reasonable choice for this problem
+        dt0 = 0.125  # selected as a reasonable choice for this problem
         y0 = self.latent_to_hidden(latent)
-        solver = diffrax.Bosh3()             # see: https://docs.kidger.site/diffrax/api/solvers/ode_solvers/
-        adjoint = diffrax.RecursiveCheckpointAdjoint() # see: https://docs.kidger.site/diffrax/api/adjoints/
+        solver = (
+            diffrax.Bosh3()
+        )  # see: https://docs.kidger.site/diffrax/api/solvers/ode_solvers/
+        adjoint = (
+            diffrax.RecursiveCheckpointAdjoint()
+        )  # see: https://docs.kidger.site/diffrax/api/adjoints/
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
             solver,
@@ -125,14 +133,7 @@ class LatentODE(eqx.Module):
         reconstruction_loss = 0.5 * jnp.sum((ys - pred_ys) ** 2)
         # KL(N(mean, std^2) || N(0, 1))
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
-        # late time penalty
-        incriment = jnp.linspace(0.1, 1.1, len(ys))
-        incriment = jnp.array([incriment, incriment]).reshape(len(ys), 2)
-        time_loss = 0#.5 * jnp.sum(incriment * (ys - pred_ys) ** 2)
-        """
-        Idea, why don't we put more weight on the later time predictions?
-        """
-        return reconstruction_loss + variational_loss  + time_loss
+        return reconstruction_loss + variational_loss
 
     # Run both encoder and decoder during training.
     def train(self, ts, ys, *, key):
@@ -146,7 +147,7 @@ class LatentODE(eqx.Module):
         return self._sample(ts, latent)
 
     def _sampleLatent(self, ts, latent):
-        dt0 = 0.2  # selected as a reasonable choice for this problem
+        dt0 = 0.1  # selected as a reasonable choice for this problem
         y0 = self.latent_to_hidden(latent)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
@@ -164,40 +165,60 @@ class LatentODE(eqx.Module):
         return self._sampleLatent(ts, latent)
 
 
-def get_data(dataset_size, *, key):
+def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
     ykey, tkey1, tkey2 = jr.split(key, 3)
-
-    # y0 = jr.normal(ykey, (dataset_size, 2))
-    y0 = jr.uniform(ykey, (dataset_size, 2), minval=0, maxval=5)
+    y0 = jr.uniform(ykey, (dataset_size, 2), minval=1, maxval=1)
     t0 = 0
-    # t1 = 2 + jr.uniform(tkey1, (dataset_size,))
-    t1 = 20 + 1 * jr.uniform(tkey1, (dataset_size,), minval=0, maxval=1)
-    ts = jr.uniform(tkey2, (dataset_size, 20)) * (t1[:, None] - t0) + t0
+    t1 = t_end + 1 * jr.uniform(tkey1, (dataset_size,), minval=0, maxval=1)
+    ts = jr.uniform(tkey2, (dataset_size, n_points)) * (t1[:, None] - t0) + t0
     ts = jnp.sort(ts)
-    dt0 = 0.25
+    dt0 = 0.1
 
-    def func(t, y, args):
-        k = 0.5
-        return jnp.array([[-k, 1.0], [-1, -k]]) @ y
+    # ------------------------
+    # Lotka-Volterra equations
+    def LVE(t, y, args):
+        prey, predator = y
+        a, b, c, d = args
+        d_prey = a * prey - b * prey * predator
+        d_predator = -d * predator + c * prey * predator
+        d_y = jnp.array([d_prey, d_predator])
+        return d_y
+    LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
 
-    # def vector_field(t, y, args):
-    #    prey, predator = y
-    #    a, b, c, d = args
-    #    d_prey = a * prey - b * prey * predator
-    #    d_predator = -d * predator + c * prey * predator
-    #    d_y = jnp.array([d_prey, d_predator])
-    #    return d_y
-    # args = (2/3, 4/3, 1, 1)
-
-    def vector_field(t, y, args):
+    # --------------------------
+    # Simple harmonic oscillator
+    def SHO(t, y, args):
         y1, y2 = y
         theta = args
         dy1 = y2
         dy2 = -y1 - theta * y2
         d_y = jnp.array([dy1, dy2])
         return d_y
+    SHO_args = 1  # theta
 
-    args = 0.5
+    # --------------------------------------
+    # Periodically forced hamonic oscillator
+    def PFHO(t, y, args):
+        y1, y2 = y
+        w, b, k, force = args
+        dy1 = y2
+        dy2 = force * jnp.cos(w * t) - b * y2 - k * y1
+        d_y = jnp.array([dy1, dy2])
+        return d_y
+
+    PFHO_args = (2, 1, 1 / 2, 1)  # w, b, k, force
+
+    if func == "LVE":
+        vector_field = LVE
+        args = LVE_args
+    elif func == "SHO":
+        vector_field = SHO
+        args = SHO_args
+    elif func == "PFHO":
+        vector_field = PFHO
+        args = PFHO_args
+    else:
+        raise ValueError("func must be one of 'LVE', 'SHO', 'PFHO'")
 
     def solve(ts, y0):
         sol = diffrax.diffeqsolve(
@@ -233,59 +254,97 @@ def dataloader(arrays, batch_size, *, key):
             end = start + batch_size
 
 
-def func(t, y, args):
-    k = 0.5
-    return jnp.array([[-k, 1.0], [-1, -k]]) @ y
-
-
-# def vector_field(t, y, args):
-#    prey, predator = y
-#    a, b, c, d = args
-#    d_prey = a * prey - b * prey * predator
-#    d_predator = -d * predator + c * prey * predator
-#    d_y = jnp.array([d_prey, d_predator])
-#    return d_y
-
-
-def vector_field(t, y, args):
-    y1, y2 = y
-    theta = args
-    dy1 = y2
-    dy2 = -y1 - theta * y2
-    d_y = jnp.array([dy1, dy2])
-    return d_y
-
-
-def solve(ts, y0):
-    sol = diffrax.diffeqsolve(
-        diffrax.ODETerm(vector_field),
-        diffrax.Tsit5(),
-        ts[0],
-        ts[-1],
-        0.1,
-        y0,
-        args=(0.5),  # (2/3, 4/3, 1, 1),
-        saveat=diffrax.SaveAt(ts=ts),
-    )
-    return sol.ys
-
-
 def main(
-    dataset_size=50000,
+    dataset_size=20000,
     batch_size=256,
     lr=1e-2,
-    steps=3000,
-    save_every=1000,
-    hidden_size=10,
-    latent_size=1,
-    width_size=10,
-    depth=3,
+    steps=30,
+    plot_every=10,
+    save_every=10,
+    hidden_size=8,
+    latent_size=2,
+    width_size=8,
+    depth=2,
     seed=1992,
+    func="PFHO",
+    figname="latent_ODE.png",
 ):
+    # Defining vector fields again for use in comparison testing
+    # ------------------------
+    # Lotka-Volterra equations
+    def LVE(t, y, args):
+        prey, predator = y
+        a, b, c, d = args
+        d_prey = a * prey - b * prey * predator
+        d_predator = -d * predator + c * prey * predator
+        d_y = jnp.array([d_prey, d_predator])
+        return d_y
+    LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
+
+    # --------------------------
+    # Simple harmonic oscillator
+    def SHO(t, y, args):
+        y1, y2 = y
+        theta = args
+        dy1 = y2
+        dy2 = -y1 - theta * y2
+        d_y = jnp.array([dy1, dy2])
+        return d_y
+    SHO_args = 1  # theta
+
+    # --------------------------------------
+    # Periodically forced hamonic oscillator
+    def PFHO(t, y, args):
+        y1, y2 = y
+        w, b, k, force = args
+        dy1 = y2
+        dy2 = force * jnp.cos(w * t) - b * y2 - k * y1
+        d_y = jnp.array([dy1, dy2])
+        return d_y
+    PFHO_args = (2, 1, 1 / 2, 1)  # w, b, k, force
+
+    if func == "LVE":
+        vector_field = LVE
+        args = LVE_args
+        rows = 3
+        TITLE = "Latent ODE Model: Lotka-Volterra Equations"
+        LAB_X = "Prey"
+        LAB_Y = "Predator"
+    elif func == "SHO":
+        vector_field = SHO
+        args = SHO_args
+        rows = 4
+        TITLE = "Latent ODE Model: Simple Harmonic Oscillator"
+        LAB_X = "Position"
+        LAB_Y = "Velocity"
+    elif func == "PFHO":
+        vector_field = PFHO
+        args = PFHO_args
+        rows = 3
+        TITLE = "Latent ODE Model: Periodically Forced Harmonic Oscillator"
+        LAB_X = "Position"
+        LAB_Y = "Velocity"
+    else:
+        raise ValueError("func must be one of 'LVE', 'SHO', 'PFHO'")
+
+    def solve(ts, y0):
+        sol = diffrax.diffeqsolve(
+            diffrax.ODETerm(vector_field),
+            diffrax.Tsit5(),
+            ts[0],
+            ts[-1],
+            0.1,
+            y0,
+            args=args,
+            saveat=diffrax.SaveAt(ts=ts),
+        )
+        return sol.ys
+
     key = jr.PRNGKey(seed)
     data_key, model_key, loader_key, train_key, sample_key = jr.split(key, 5)
 
-    ts, ys = get_data(dataset_size, key=data_key)
+    # get the data
+    ts, ys = get_data(dataset_size, key=data_key, func=func, t_end=20, n_points=200)
 
     model = LatentODE(
         data_size=ys.shape[-1],
@@ -315,12 +374,11 @@ def main(
     opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
 
     # Plot results
-    num_plots = 1 + (steps - 1) // save_every
-    if ((steps - 1) % save_every) != 0:
+    num_plots = 1 + (steps - 1) // plot_every
+    if ((steps - 1) % plot_every) != 0:
         num_plots += 1
-    fig, axs = plt.subplots(3, num_plots, figsize=(num_plots * 4, 12))
+    fig, axs = plt.subplots(rows, num_plots, figsize=(num_plots * 4, rows * 4 - 2))
     idx = 0
-    axs[0][idx].set_ylabel("arb")
     for step, (ts_i, ys_i) in zip(
         range(steps), dataloader((ts, ys), batch_size, key=loader_key)
     ):
@@ -331,11 +389,18 @@ def main(
         end = time.time()
         print(f"Step: {step}, Loss: {value}, Computation time: {end - start}")
 
+        # save parameters
+        SAVE_DIR = "saved_models"
+        if not os.path.exists(SAVE_DIR):
+            os.makedirs(SAVE_DIR)
         if (step % save_every) == 0 or step == steps - 1:
-            ax = axs[0][idx]
-            # Sample over a longer time interval than we trained on. The model will be
-            # sufficiently good that it will correctly extrapolate!
+            fn = SAVE_DIR + "/latentODE" + str(step) + ".eqx"
+            eqx.tree_serialise_leaves(fn, model)
+
+        if (step % plot_every) == 0 or step == steps - 1:
+            # create some sample trajectories
             t_end = 40
+            ext = 20
             sample_t = jnp.linspace(0, t_end, 300)
             sample_y = model.sample(sample_t, key=sample_key)
             sample_latent = model.sampleLatent(sample_t, key=sample_key)
@@ -343,32 +408,50 @@ def main(
             sample_t = np.asarray(sample_t)
             sample_y = np.asarray(sample_y)
             exact_y = solve(sample_t, sample_y[0, :])
-            ax.plot(sample_t, sample_y[:, 0], color="firebrick", label="position")
-            ax.plot(sample_t, sample_y[:, 1], color="steelblue", label="velocity")
-            ax.scatter(sample_t, exact_y[:, 0], color="firebrick", s=3)
-            ax.scatter(sample_t, exact_y[:, 1], color="steelblue", s=3)
-            #ax.vlines(
-            #    10,
-            #    np.min([[sample_y, exact_y]]),
-            #    np.max([[sample_y, exact_y]]),
-            #    color="black",
-            #    linestyle="-",
-            #    label=r"upper bound $t_{train}$",
-            #)
+            sz = 2
+            # plot the trajectories in data space
+            ax = axs[0][idx]
+            ax.plot(sample_t, sample_y[:, 0], color="firebrick", label=LAB_X)
+            ax.plot(sample_t, sample_y[:, 1], color="steelblue", label=LAB_Y)
+            ax.scatter(sample_t, exact_y[:, 0], color="firebrick", s=sz)
+            ax.scatter(sample_t, exact_y[:, 1], color="steelblue", s=sz)
             ax.set_title(f"training step: {step}")
             ax.set_xlabel("t")
-            ax.axvspan(20, t_end+2, alpha=0.2, color='coral')
+            ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
             ax.set_xlim([0, t_end])
             if idx == 0:
+                ax.set_ylabel("arb")
                 ax.legend()
 
             # the phase space plot
             ax = axs[1][idx]
-            ax.plot(sample_y[:, 0], sample_y[:, 1], color="gray", label="LatentODE")
-            ax.scatter(exact_y[:, 0], exact_y[:, 1], color="gray", s=3, label="exact")
-            ax.set_xlabel("position")
+            sample_y_in = sample_y[sample_t < ext]
+            sample_y_out = sample_y[sample_t >= ext]
+            exact_y_in = exact_y[sample_t < ext]
+            exact_y_out = exact_y[sample_t >= ext]
+            ax.plot(
+                sample_y_in[:, 0],
+                sample_y_in[:, 1],
+                color="darkgray",
+                label="LatentODE",
+            )
+            ax.scatter(
+                exact_y_in[:, 0],
+                exact_y_in[:, 1],
+                color="darkgray",
+                s=sz,
+                label="exact",
+            )
+            ax.plot(
+                sample_y_out[:, 0],
+                sample_y_out[:, 1],
+                color="coral",
+                label="ODE: extrapolated",
+            )
+            ax.scatter(exact_y_out[:, 0], exact_y_out[:, 1], color="coral", s=sz)
+            ax.set_xlabel(LAB_X)
             if idx == 0:
-                ax.set_ylabel("velocity")
+                ax.set_ylabel(LAB_Y)
                 ax.legend()
 
             # now the latent space plot
@@ -379,16 +462,50 @@ def main(
                 color = cmap(i / sample_latent.shape[1])
                 ax.plot(sample_t, sample_latent[:, i], color=color, label=name)
             ax.set_xlabel("time")
-            ax.axvspan(20, t_end+2, alpha=0.2, color='coral')
+            ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
             ax.set_xlim([0, t_end])
             if idx == 0:
                 ax.set_ylabel("arb")
                 ax.legend()
+
+            if rows > 3:
+                ax = axs[3][idx]
+                latent_in = sample_latent[sample_t < ext]
+                latent_out = sample_latent[sample_t >= ext]
+                ax.plot(
+                    latent_in[:, 0],
+                    latent_in[:, 1],
+                    color="darkgray",
+                    label="LatentODE",
+                )
+                ax.plot(
+                    latent_out[:, 0],
+                    latent_out[:, 1],
+                    color="coral",
+                    label="ODE: extrapolated",
+                )
+                ax.set_xlabel("latent 0")
+                if idx == 0:
+                    ax.set_ylabel("latent 1")
             idx += 1
 
-    plt.suptitle("Latent ODE Model: Simple Harmonic Oscillator", y=0.935, fontsize=20)
-    plt.savefig("latent_ode.png", bbox_inches="tight", dpi=200)
+    plt.suptitle(TITLE, y=0.935, fontsize=20)
+    plt.savefig(figname, bbox_inches="tight", dpi=200)
     plt.show()
 
 
+# run the code
 main()
+# dataset_size=20000,
+# batch_size=256,
+# lr=1e-2,
+# steps=30,
+# plot_every=10,
+# save_every=10,
+# hidden_size=8,
+# latent_size=2,
+# width_size=8,
+# depth=2,
+# seed=1992,
+# func="PFHO"
+# figname="latentODE.png")
