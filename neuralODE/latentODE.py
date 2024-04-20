@@ -184,7 +184,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
+    LVE_args = (1, 0.5, 1, 0.50)  # a, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -196,7 +196,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = 1  # theta
+    SHO_args = (1)  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -208,7 +208,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    PFHO_args = (2, 1, 1 / 2, 1)  # w, b, k, force
+    PFHO_args = (1, 1, 1, 3)  # w, b, k, force
 
     if func == "LVE":
         vector_field = LVE
@@ -282,7 +282,7 @@ def main(
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (1, 0.1, 1.5, 0.75)  # a, b, c, d
+    LVE_args = (1, 0.5, 1, 0.5)  # a=prey-growth, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -306,7 +306,7 @@ def main(
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    PFHO_args = (2, 1, 1 / 2, 1)  # w, b, k, force
+    PFHO_args = (1, 1, 1 , 3)  # w, b, k, force
 
     if func == "LVE":
         vector_field = LVE
@@ -496,17 +496,17 @@ def main(
 
     plt.suptitle(TITLE, y=0.935, fontsize=20)
     plt.savefig(figname, bbox_inches="tight", dpi=200)
-    plt.show()
 
 
 # run the code
 main(
-    steps=100,
-    plot_every=10,
-    save_every=10,
+    lr=3e-3,
+    steps=60000,
+    plot_every=20000,
+    save_every=20000,
     hidden_size=8,
     latent_size=2,
     width_size=8,
-    func="PFHO",
+    func="LVE",
     figname="latentODE.png",
 )
