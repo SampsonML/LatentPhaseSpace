@@ -135,11 +135,28 @@ class LatentODE(eqx.Module):
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
         return reconstruction_loss + variational_loss
 
+    @staticmethod
+    def _latentloss(self, ts, ys, pred_ys, pred_latent, mean, std, key):
+        # -log p_θ with Gaussian p_θ
+        reconstruction_loss = 0.5 * jnp.sum((ys - pred_ys) ** 2)
+        # KL(N(mean, std^2) || N(0, 1))
+        variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
+        # Malhanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
+        diff = pred_ys[:-1] - pred_ys[1:]
+        Cov = jnp.eye(self.latent_size) # for now identity 
+        d_latent = jnp.sqrt(jnp.sum( (diff) @ Cov  * (diff)) )
+        #jax.debug.print("latent_dist: {}", d_latent)
+        alpha = 5
+        return reconstruction_loss + variational_loss + alpha * d_latent
+
     # Run both encoder and decoder during training.
     def train(self, ts, ys, *, key):
         latent, mean, std = self._latent(ts, ys, key)
         pred_ys = self._sample(ts, latent)
-        return self._loss(ys, pred_ys, mean, std)
+        pred_latent = self._sampleLatent(ts, latent)
+    #    return self._loss(ys, pred_ys, mean, std)
+        return self._latentloss(self, ts, ys, pred_ys, pred_latent, mean, std, key)
+
 
     # Run just the decoder during inference.
     def sample(self, ts, *, key):
@@ -501,12 +518,12 @@ def main(
 # run the code
 main(
     lr=3e-3,
-    steps=60000,
-    plot_every=20000,
-    save_every=20000,
+    steps=900,
+    plot_every=300,
+    save_every=300,
     hidden_size=8,
     latent_size=2,
     width_size=8,
-    func="LVE",
+    func="PFHO",
     figname="latentPlot.png",
 )
