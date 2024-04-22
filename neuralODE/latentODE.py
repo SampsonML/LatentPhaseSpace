@@ -508,5 +508,5 @@ main(
     latent_size=2,
     width_size=8,
     func="LVE",
-    figname="latentODE.png",
+    figname="latentPlot.png",
 )
