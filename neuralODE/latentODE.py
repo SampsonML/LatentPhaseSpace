@@ -17,8 +17,8 @@ import optax
 import os
 
 # turn on float 64
-# from jax import config
-# config.update("jax_enable_x64", True)
+from jax import config
+config.update("jax_enable_x64", True)
 
 # Matt's plotting params
 # ---------------------------------------------- #
@@ -64,8 +64,10 @@ class LatentODE(eqx.Module):
     hidden_size: int
     latent_size: int
 
+    lossType: str
+
     def __init__(
-        self, *, data_size, hidden_size, latent_size, width_size, depth, key, **kwargs
+        self, *, data_size, hidden_size, latent_size, width_size, depth, key, lossType, **kwargs
     ):
         super().__init__(**kwargs)
 
@@ -93,6 +95,8 @@ class LatentODE(eqx.Module):
         self.hidden_size = hidden_size
         self.latent_size = latent_size
 
+        self.lossType = lossType
+
     # Encoder of the VAE
     def _latent(self, ts, ys, key):
         data = jnp.concatenate([ts[:, None], ys], axis=1)
@@ -110,7 +114,7 @@ class LatentODE(eqx.Module):
         dt0 = 0.125  # selected as a reasonable choice for this problem
         y0 = self.latent_to_hidden(latent)
         solver = (
-            diffrax.Bosh3()
+            diffrax.Tsit5()
         )  # see: https://docs.kidger.site/diffrax/api/solvers/ode_solvers/
         adjoint = (
             diffrax.RecursiveCheckpointAdjoint()
@@ -143,11 +147,11 @@ class LatentODE(eqx.Module):
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
         # Mahalanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
         diff = jnp.diff(pred_latent, axis=0)
-        Cov = jnp.eye(diff.shape[1]) * std # for now identity
+        std_latent = self.hidden_to_latent(self.latent_to_hidden(std)) # get the latent space std
+        Cov = jnp.eye(diff.shape[1]) * std_latent # for now identity
         Cov = jnp.linalg.inv(Cov)
-        d_latent = jnp.sqrt(jnp.sum( jnp.dot(diff , Cov) * diff, axis=1))
+        d_latent = jnp.sqrt(jnp.abs(jnp.sum( jnp.dot(diff , Cov) @ diff.T, axis=1)))
         d_latent = jnp.sum(d_latent)
-        #jax.debug.print("size of latent dist is {}", d_latent)
         #jax.debug.print("latent distance: {}", d_latent)
         alpha = 1 # weighting parameter for distance penalty
         return reconstruction_loss + variational_loss + alpha * d_latent
@@ -157,8 +161,12 @@ class LatentODE(eqx.Module):
         latent, mean, std = self._latent(ts, ys, key)
         pred_ys = self._sample(ts, latent)
         pred_latent = self._sampleLatent(ts, latent)
-    #    return self._loss(ys, pred_ys, mean, std)
-        return self._latentloss(self, ts, ys, pred_ys, pred_latent, mean, std, key)
+        if self.lossType == "default":
+            return self._loss(ys, pred_ys, mean, std)
+        elif self.lossType == "mahalanobis":
+            return self._latentloss(self, ts, ys, pred_ys, pred_latent, mean, std, key)
+        else:
+            raise ValueError("lossType must be one of 'default', 'mahalanobis'")
 
 
     # Run just the decoder during inference.
@@ -167,11 +175,11 @@ class LatentODE(eqx.Module):
         return self._sample(ts, latent)
 
     def _sampleLatent(self, ts, latent):
-        dt0 = 0.1  # selected as a reasonable choice for this problem
+        dt0 = 0.25  # selected as a reasonable choice for this problem
         y0 = self.latent_to_hidden(latent)
         sol = diffrax.diffeqsolve(
             diffrax.ODETerm(self.func),
-            diffrax.Bosh3(),
+            diffrax.Tsit5(),
             ts[0],
             ts[-1],
             dt0,
@@ -289,6 +297,7 @@ def main(
     width_size=8,
     depth=2,
     seed=1992,
+    lossType="default",
     func="PFHO",
     figname="latent_ODE.png",
 ):
@@ -379,6 +388,7 @@ def main(
         width_size=width_size,
         depth=depth,
         key=model_key,
+        lossType=lossType,
     )
 
     @eqx.filter_value_and_grad
@@ -410,7 +420,7 @@ def main(
     ):
         start = time.time()
         value, model, opt_state, train_key = make_step(
-            model, opt_state, ts_i, ys_i, train_key
+            model, opt_state, ts_i, ys_i, train_key,
         )
         end = time.time()
         print(f"Step: {step}, Loss: {value}, Computation time: {end - start}")
@@ -521,7 +531,7 @@ def main(
 
 # run the code
 main(
-    n_points=50,
+    n_points=150,
     lr=1e-2,
     steps=300,
     plot_every=100,
@@ -529,6 +539,9 @@ main(
     hidden_size=4,
     latent_size=1,
     width_size=4,
+    depth=2,
+    seed=1992,
+    lossType="mahalanobis",
     func="SHO",
-    figname="latentPlot.png",
+    figname="SHO_mahalanobis_loss.png",
 )
