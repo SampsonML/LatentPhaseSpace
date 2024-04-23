@@ -142,11 +142,12 @@ class LatentODE(eqx.Module):
         # KL(N(mean, std^2) || N(0, 1))
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
         # Malhanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
-        diff = pred_ys[:-1] - pred_ys[1:]
-        Cov = jnp.eye(self.latent_size) # for now identity 
+        diff = jnp.diff(pred_latent)
+        Cov = jnp.eye(self.latent_size) * std # for now identity
+        Cov = jnp.linalg.inv(Cov)
         d_latent = jnp.sqrt(jnp.sum( (diff) @ Cov  * (diff)) )
         #jax.debug.print("latent_dist: {}", d_latent)
-        alpha = 5
+        alpha = 1
         return reconstruction_loss + variational_loss + alpha * d_latent
 
     # Run both encoder and decoder during training.
@@ -213,7 +214,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = (1)  # theta
+    SHO_args = (0.25)  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -311,7 +312,7 @@ def main(
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = 1  # theta
+    SHO_args = 0.25  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -517,13 +518,13 @@ def main(
 
 # run the code
 main(
-    lr=3e-3,
-    steps=900,
-    plot_every=300,
-    save_every=300,
-    hidden_size=8,
-    latent_size=2,
-    width_size=8,
-    func="PFHO",
+    lr=1e-2,
+    steps=15,
+    plot_every=5,
+    save_every=5,
+    hidden_size=4,
+    latent_size=1,
+    width_size=4,
+    func="SHO",
     figname="latentPlot.png",
 )
