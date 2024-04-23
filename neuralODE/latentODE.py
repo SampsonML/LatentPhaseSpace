@@ -141,7 +141,7 @@ class LatentODE(eqx.Module):
         reconstruction_loss = 0.5 * jnp.sum((ys - pred_ys) ** 2)
         # KL(N(mean, std^2) || N(0, 1))
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
-        # Malhanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
+        # Mahalanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
         diff = jnp.diff(pred_latent, axis=0)
         Cov = jnp.eye(diff.shape[1]) * std # for now identity
         Cov = jnp.linalg.inv(Cov)
