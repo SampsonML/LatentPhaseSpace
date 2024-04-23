@@ -1,6 +1,10 @@
-# Matt Sampson, Latent Space Least Action Models
-# Testing grounds
-# initial latentODE architecture modified from Patrick Kidger/Ricky Chen
+# -------------------------------------------------- #
+# Matt Sampson, Latent Space Least Action Models     #
+# Testing grounds for altering loss function         #
+# initial latentODE architecture modified from       #
+# https://arxiv.org/abs/1907.03907, with diffrax     #
+# implementation from Patrick Kidger                 #
+# -------------------------------------------------- #
 import time
 import diffrax
 import equinox as eqx
@@ -16,14 +20,13 @@ from numpy.lib.shape_base import row_stack
 import optax
 import os
 
-# turn on float 64
+# turn on float 64 - needed to stabalise diffrax for small gradients (see: https://docs.kidger.site/diffrax/further_details/faq/)
 from jax import config
 config.update("jax_enable_x64", True)
 
-# Matt's plotting params
+# Matt's standard plot params
 # ---------------------------------------------- #
 import matplotlib as mpl
-
 mpl.rcParams["xtick.top"] = True
 mpl.rcParams["ytick.right"] = True
 mpl.rcParams["xtick.direction"] = "in"
@@ -44,7 +47,7 @@ mpl.rcParams["mathtext.fontset"] = "dejavuserif"
 mpl.rcParams.update({"text.usetex": True})
 # ---------------------------------------------- #
 
-
+# The nn representing the ODE function
 class Func(eqx.Module):
     scale: jnp.ndarray
     mlp: eqx.nn.MLP
@@ -52,7 +55,7 @@ class Func(eqx.Module):
     def __call__(self, t, y, args):
         return self.scale * self.mlp(y)
 
-
+# The LatentODE model based on a Variational Autoencoder
 class LatentODE(eqx.Module):
     func: Func
     rnn_cell: eqx.nn.GRUCell
