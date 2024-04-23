@@ -1,6 +1,6 @@
-# LatentODEs testing grounds
-# architecture and template from Patrick Kidger
-# at (https://github.com/patrick-kidger/diffrax/blob/main/examples/latent_ode.ipynb)
+# Matt Sampson, Latent Space Least Action Models
+# Testing grounds
+# initial latentODE architecture modified from Patrick Kidger/Ricky Chen
 import time
 import diffrax
 import equinox as eqx
@@ -142,12 +142,14 @@ class LatentODE(eqx.Module):
         # KL(N(mean, std^2) || N(0, 1))
         variational_loss = 0.5 * jnp.sum(mean**2 + std**2 - 2 * jnp.log(std) - 1)
         # Malhanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
-        diff = jnp.diff(pred_latent)
-        Cov = jnp.eye(self.latent_size) * std # for now identity
+        diff = jnp.diff(pred_latent, axis=0)
+        Cov = jnp.eye(diff.shape[1]) * std # for now identity
         Cov = jnp.linalg.inv(Cov)
-        d_latent = jnp.sqrt(jnp.sum( (diff) @ Cov  * (diff)) )
-        #jax.debug.print("latent_dist: {}", d_latent)
-        alpha = 1
+        d_latent = jnp.sqrt(jnp.sum( jnp.dot(diff , Cov) * diff, axis=1))
+        d_latent = jnp.sum(d_latent)
+        #jax.debug.print("size of latent dist is {}", d_latent)
+        #jax.debug.print("latent distance: {}", d_latent)
+        alpha = 1 # weighting parameter for distance penalty
         return reconstruction_loss + variational_loss + alpha * d_latent
 
     # Run both encoder and decoder during training.
@@ -185,7 +187,7 @@ class LatentODE(eqx.Module):
 
 def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
     ykey, tkey1, tkey2 = jr.split(key, 3)
-    y0 = jr.uniform(ykey, (dataset_size, 2), minval=1, maxval=1)
+    y0 = jr.uniform(ykey, (dataset_size, 2), minval=0, maxval=5)
     t0 = 0
     t1 = t_end + 1 * jr.uniform(tkey1, (dataset_size,), minval=0, maxval=1)
     ts = jr.uniform(tkey2, (dataset_size, n_points)) * (t1[:, None] - t0) + t0
@@ -214,7 +216,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = (0.25)  # theta
+    SHO_args = (0.15)  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -277,6 +279,7 @@ def dataloader(arrays, batch_size, *, key):
 def main(
     dataset_size=20000,
     batch_size=256,
+    n_points=100,
     lr=1e-2,
     steps=30,
     plot_every=10,
@@ -312,7 +315,7 @@ def main(
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = 0.25  # theta
+    SHO_args = 0.15  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -367,7 +370,7 @@ def main(
     data_key, model_key, loader_key, train_key, sample_key = jr.split(key, 5)
 
     # get the data
-    ts, ys = get_data(dataset_size, key=data_key, func=func, t_end=20, n_points=200)
+    ts, ys = get_data(dataset_size, key=data_key, func=func, t_end=20, n_points=n_points)
 
     model = LatentODE(
         data_size=ys.shape[-1],
@@ -518,10 +521,11 @@ def main(
 
 # run the code
 main(
+    n_points=50,
     lr=1e-2,
-    steps=15,
-    plot_every=5,
-    save_every=5,
+    steps=300,
+    plot_every=100,
+    save_every=100,
     hidden_size=4,
     latent_size=1,
     width_size=4,
