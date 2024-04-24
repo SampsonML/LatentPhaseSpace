@@ -3,7 +3,7 @@
 # Testing grounds for altering loss function         #
 # initial latentODE architecture modified from       #
 # https://arxiv.org/abs/1907.03907, with diffrax     #
-# implementation from Patrick Kidger                 #
+# implementation initially from Patrick Kidger       #
 # -------------------------------------------------- #
 import time
 import diffrax
@@ -66,11 +66,12 @@ class LatentODE(eqx.Module):
 
     hidden_size: int
     latent_size: int
+    alpha: int
 
     lossType: str
 
     def __init__(
-        self, *, data_size, hidden_size, latent_size, width_size, depth, key, lossType, **kwargs
+        self, *, data_size, hidden_size, latent_size, width_size, depth, alpha, key, lossType, **kwargs
     ):
         super().__init__(**kwargs)
 
@@ -88,7 +89,8 @@ class LatentODE(eqx.Module):
         )
         self.func = Func(scale, mlp)
         self.rnn_cell = eqx.nn.GRUCell(data_size + 1, hidden_size, key=gkey)
-
+        # TODO: Why the increase in dimensionality here in hidden_to_latent (2 * latent_size)? 
+        # Ask Patrick maybe, assume it follows from the paper as it is stated?
         self.hidden_to_latent = eqx.nn.Linear(hidden_size, 2 * latent_size, key=hlkey)
         self.latent_to_hidden = eqx.nn.MLP(
             latent_size, hidden_size, width_size=width_size, depth=depth, key=lhkey
@@ -97,6 +99,7 @@ class LatentODE(eqx.Module):
 
         self.hidden_size = hidden_size
         self.latent_size = latent_size
+        self.alpha = alpha
 
         self.lossType = lossType
 
@@ -151,12 +154,16 @@ class LatentODE(eqx.Module):
         # Mahalanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
         diff = jnp.diff(pred_latent, axis=0)
         std_latent = self.hidden_to_latent(self.latent_to_hidden(std)) # get the latent space std
-        Cov = jnp.eye(diff.shape[1]) * std_latent # for now identity
+        #std_hidden = self.latent_to_hidden(std_latent) # get the hidden space std
+        Cov = jnp.eye(diff.shape[1]) * std_latent # latent_state
+        #Cov = jnp.eye(diff.shape[1]) * std_hidden # hidden state
         Cov = jnp.linalg.inv(Cov)
         d_latent = jnp.sqrt(jnp.abs(jnp.sum( jnp.dot(diff , Cov) @ diff.T, axis=1)))
         d_latent = jnp.sum(d_latent)
         #jax.debug.print("latent distance: {}", d_latent)
-        alpha = 1 # weighting parameter for distance penalty
+        alpha = self.alpha #1 # weighting parameter for distance penalty
+        # can I just set the weight of the path loss to be same order as others?
+        #Lambda = alpha * ( (reconstruction_loss + variational_loss) / 2 ) / d_latent
         return reconstruction_loss + variational_loss + alpha * d_latent
 
     # Run both encoder and decoder during training.
@@ -190,6 +197,7 @@ class LatentODE(eqx.Module):
             saveat=diffrax.SaveAt(ts=ts),
         )
         return jax.vmap(self.hidden_to_latent)(sol.ys)
+    #return sol.ys
 
     def sampleLatent(self, ts, *, key):
         latent = jr.normal(key, (self.latent_size,))
@@ -198,7 +206,7 @@ class LatentODE(eqx.Module):
 
 def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
     ykey, tkey1, tkey2 = jr.split(key, 3)
-    y0 = jr.uniform(ykey, (dataset_size, 2), minval=0, maxval=5)
+    y0 = jr.uniform(ykey, (dataset_size, 2), minval=1, maxval=1)
     t0 = 0
     t1 = t_end + 1 * jr.uniform(tkey1, (dataset_size,), minval=0, maxval=1)
     ts = jr.uniform(tkey2, (dataset_size, n_points)) * (t1[:, None] - t0) + t0
@@ -215,7 +223,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (1, 0.5, 1, 0.50)  # a, b, c, d
+    LVE_args = (2, 0.5, 3/2, 3/2)  # a, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -267,6 +275,9 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         return sol.ys
 
     ys = jax.vmap(solve)(ts, y0)
+    #mid = n_points // 2
+    #ts = jnp.concatenate([ts[:mid], ts[mid + 30:]], axis=0)
+    #ys = jnp.concatenate([ys[:mid], ys[mid + 30:]], axis=0)
 
     return ts, ys
 
@@ -299,7 +310,9 @@ def main(
     latent_size=2,
     width_size=8,
     depth=2,
+    alpha=1,
     seed=1992,
+    t_final=20,
     lossType="default",
     func="PFHO",
     figname="latent_ODE.png",
@@ -315,7 +328,7 @@ def main(
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (1, 0.5, 1, 0.5)  # a=prey-growth, b, c, d
+    LVE_args = (2, 0.5, 3/2, 3/2)  # a=prey-growth, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -340,6 +353,10 @@ def main(
         return d_y
 
     PFHO_args = (1, 1, 1 , 3)  # w, b, k, force
+
+    def PO(t,y,args):
+        dy = jnp.sin(t)
+        return dy
 
     if func == "LVE":
         vector_field = LVE
@@ -382,7 +399,7 @@ def main(
     data_key, model_key, loader_key, train_key, sample_key = jr.split(key, 5)
 
     # get the data
-    ts, ys = get_data(dataset_size, key=data_key, func=func, t_end=20, n_points=n_points)
+    ts, ys = get_data(dataset_size, key=data_key, func=func, t_end=t_final, n_points=n_points)
 
     model = LatentODE(
         data_size=ys.shape[-1],
@@ -391,6 +408,7 @@ def main(
         width_size=width_size,
         depth=depth,
         key=model_key,
+        alpha=alpha,
         lossType=lossType,
     )
 
@@ -413,11 +431,14 @@ def main(
     opt_state = optim.init(eqx.filter(model, eqx.is_inexact_array))
 
     # Plot results
-    num_plots = 1 + (steps - 1) // plot_every
-    if ((steps - 1) % plot_every) != 0:
-        num_plots += 1
+    #num_plots = 1 + (steps - 1) // plot_every
+    num_plots = (steps) // plot_every # don't plot initial untrained model
+    #if ((steps - 1) % plot_every) != 0:
+    #    num_plots += 1
     fig, axs = plt.subplots(rows, num_plots, figsize=(num_plots * 4, rows * 4 - 2))
     idx = 0
+    f_sz = 16
+    loss_vector = []
     for step, (ts_i, ys_i) in zip(
         range(steps), dataloader((ts, ys), batch_size, key=loader_key)
     ):
@@ -427,6 +448,7 @@ def main(
         )
         end = time.time()
         print(f"Step: {step}, Loss: {value}, Computation time: {end - start}")
+        loss_vector.append(value)
 
         # save parameters
         SAVE_DIR = "saved_models"
@@ -436,10 +458,10 @@ def main(
             fn = SAVE_DIR + "/latentODE" + str(step) + ".eqx"
             eqx.tree_serialise_leaves(fn, model)
 
-        if (step % plot_every) == 0 or step == steps - 1:
+        if ( (step % plot_every) == 0 and (step > 0) ) or step == steps - 1:
             # create some sample trajectories
-            t_end = 40
-            ext = 20
+            t_end = 60
+            ext = t_final
             sample_t = jnp.linspace(0, t_end, 300)
             sample_y = model.sample(sample_t, key=sample_key)
             sample_latent = model.sampleLatent(sample_t, key=sample_key)
@@ -454,12 +476,12 @@ def main(
             ax.plot(sample_t, sample_y[:, 1], color="steelblue", label=LAB_Y)
             ax.scatter(sample_t, exact_y[:, 0], color="firebrick", s=sz)
             ax.scatter(sample_t, exact_y[:, 1], color="steelblue", s=sz)
-            ax.set_title(f"training step: {step}")
-            ax.set_xlabel("t")
+            ax.set_title(f"training step: {step}", fontsize=f_sz)
+            ax.set_xlabel("time (s)", fontsize=f_sz)
             ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
             ax.set_xlim([0, t_end])
             if idx == 0:
-                ax.set_ylabel("arb")
+                ax.set_ylabel("arb", fontsize=f_sz)
                 ax.legend()
 
             # the phase space plot
@@ -488,9 +510,9 @@ def main(
                 label="ODE: extrapolated",
             )
             ax.scatter(exact_y_out[:, 0], exact_y_out[:, 1], color="coral", s=sz)
-            ax.set_xlabel(LAB_X)
+            ax.set_xlabel(LAB_X, fontsize=f_sz)
             if idx == 0:
-                ax.set_ylabel(LAB_Y)
+                ax.set_ylabel(LAB_Y, fontsize=f_sz)
                 ax.legend()
 
             # now the latent space plot
@@ -500,11 +522,11 @@ def main(
                 name = f"latent{i}"
                 color = cmap(i / sample_latent.shape[1])
                 ax.plot(sample_t, sample_latent[:, i], color=color, label=name)
-            ax.set_xlabel("time")
+            ax.set_xlabel("time (s)", fontsize=f_sz)
             ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
             ax.set_xlim([0, t_end])
             if idx == 0:
-                ax.set_ylabel("arb")
+                ax.set_ylabel("arb", fontsize=f_sz)
                 ax.legend()
 
             if rows > 3:
@@ -523,28 +545,54 @@ def main(
                     color="coral",
                     label="ODE: extrapolated",
                 )
-                ax.set_xlabel("latent 0")
+                ax.set_xlabel("latent 0", fontsize=f_sz)
                 if idx == 0:
-                    ax.set_ylabel("latent 1")
+                    ax.set_ylabel("latent 1", fontsize=f_sz)
             idx += 1
 
     plt.suptitle(TITLE, y=0.935, fontsize=20)
     plt.savefig(figname, bbox_inches="tight", dpi=200)
+    figname2 = figname.replace(".png", ".pdf")
+    plt.savefig(figname2, bbox_inches="tight", dpi=200)
 
+    # Plot the loss figure and interpolation error
+    fig, ax = plt.subplots(1, 2, figsize=(8, 3))
 
-# run the code
+    # the loss
+    ax[0].plot(loss_vector, color="black")
+    ax[0].set_xlabel("step", fontsize=f_sz)
+    ax[0].set_ylabel("loss", fontsize=f_sz)
+
+    # the interpolation error
+    error = (sample_y - exact_y) ** 2 
+    error = np.sum(error, axis=1)
+    ax[1].plot(sample_t, error, color="gray")
+    ax[1].axvspan(ext, t_end + 2, alpha=0.2, color="coral")
+    ax[1].set_xlabel("time", fontsize=f_sz)
+    ax[1].set_ylabel("square error", fontsize=f_sz)
+    ax[1].set_xlim([0, t_end])
+    
+    # rename and save the figure
+    figname = figname.replace(".png", "_loss.png")
+    plt.savefig(figname, bbox_inches="tight", dpi=200)
+    figname2 = figname.replace(".png", ".pdf")
+    plt.savefig(figname2, bbox_inches="tight", dpi=200)
+
+# run the code son
 main(
-    n_points=150,
+    n_points=150,              # number of points in the ODE data
     lr=1e-2,
-    steps=300,
-    plot_every=100,
-    save_every=100,
+    steps=601,
+    plot_every=200,
+    save_every=200,
     hidden_size=4,
     latent_size=1,
-    width_size=4,
+    width_size=50,
     depth=2,
+    alpha=1,                  # strength of the path penalty
     seed=1992,
-    lossType="mahalanobis",
-    func="SHO",
-    figname="SHO_mahalanobis_loss.png",
+    t_final=20,
+    lossType="mahalanobis",    # {default, mahalanobis}
+    func="SHO",                # {LVE, SHO, PFHO}
+    figname="SHO_mahalanobis_dynamics.png",
 )
