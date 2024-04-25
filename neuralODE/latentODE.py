@@ -206,9 +206,9 @@ class LatentODE(eqx.Module):
 
 def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
     ykey, tkey1, tkey2 = jr.split(key, 3)
-    y0 = jr.uniform(ykey, (dataset_size, 2), minval=1, maxval=1)
+    y0 = jr.uniform(ykey, (dataset_size, 2), minval=3, maxval=3)
     t0 = 0
-    t1 = t_end + 1 * jr.uniform(tkey1, (dataset_size,), minval=0, maxval=1)
+    t1 = t_end + 1 * jr.uniform(tkey1, (dataset_size,), minval=1, maxval=1)
     ts = jr.uniform(tkey2, (dataset_size, n_points)) * (t1[:, None] - t0) + t0
     ts = jnp.sort(ts)
     dt0 = 0.1
@@ -223,7 +223,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (2, 0.5, 3/2, 3/2)  # a, b, c, d
+    LVE_args = (0.5, 0.5, 1.5, 0.5)  # a, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -235,7 +235,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = (0.15)  # theta
+    SHO_args = (0.125)  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -328,7 +328,7 @@ def main(
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (2, 0.5, 3/2, 3/2)  # a=prey-growth, b, c, d
+    LVE_args = (0.5, 0.5, 1.5, 0.5)  # a=prey-growth, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -340,7 +340,7 @@ def main(
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = 0.15  # theta
+    SHO_args = 0.125  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -363,15 +363,15 @@ def main(
         args = LVE_args
         rows = 3
         TITLE = "Latent ODE Model: Lotka-Volterra Equations"
-        LAB_X = "Prey"
-        LAB_Y = "Predator"
+        LAB_X = "prey"
+        LAB_Y = "predator"
     elif func == "SHO":
         vector_field = SHO
         args = SHO_args
         rows = 4
         TITLE = "Latent ODE Model: Simple Harmonic Oscillator"
-        LAB_X = "Position"
-        LAB_Y = "Velocity"
+        LAB_X = "position"
+        LAB_Y = "pelocity"
     elif func == "PFHO":
         vector_field = PFHO
         args = PFHO_args
@@ -460,7 +460,7 @@ def main(
 
         if ( (step % plot_every) == 0 and (step > 0) ) or step == steps - 1:
             # create some sample trajectories
-            t_end = 60
+            t_end = 40
             ext = t_final
             sample_t = jnp.linspace(0, t_end, 300)
             sample_y = model.sample(sample_t, key=sample_key)
@@ -472,17 +472,25 @@ def main(
             sz = 2
             # plot the trajectories in data space
             ax = axs[0][idx]
-            ax.plot(sample_t, sample_y[:, 0], color="firebrick", label=LAB_X)
-            ax.plot(sample_t, sample_y[:, 1], color="steelblue", label=LAB_Y)
+            if idx == 0: ax.plot(sample_t, sample_y[:, 0], color="firebrick", label=LAB_X)
+            if idx == 0: ax.plot(sample_t, sample_y[:, 1], color="steelblue", label=LAB_Y)
+            if idx == 0: ax.scatter(-10, 2, color='black', s=sz, label='exact')
             ax.scatter(sample_t, exact_y[:, 0], color="firebrick", s=sz)
             ax.scatter(sample_t, exact_y[:, 1], color="steelblue", s=sz)
             ax.set_title(f"training step: {step}", fontsize=f_sz)
             ax.set_xlabel("time (s)", fontsize=f_sz)
-            ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
+            if idx== 0: ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral")
             ax.set_xlim([0, t_end])
             if idx == 0:
                 ax.set_ylabel("arb", fontsize=f_sz)
                 ax.legend()
+            else:
+                ax.plot(sample_t, sample_y[:, 0], color="firebrick")
+                ax.plot(sample_t, sample_y[:, 1], color="steelblue")
+                ax.axvspan(ext, t_end + 2, alpha=0.2, color="coral", label="extrapolation")
+                ax.legend()
+
+
 
             # the phase space plot
             ax = axs[1][idx]
@@ -581,18 +589,39 @@ def main(
 # run the code son
 main(
     n_points=150,              # number of points in the ODE data
-    lr=1e-2,
-    steps=601,
-    plot_every=200,
-    save_every=200,
-    hidden_size=4,
-    latent_size=1,
+    lr=5e-3,
+    steps=101,
+    plot_every=33,
+    save_every=33,
+    hidden_size=16,
+    latent_size=8,
     width_size=50,
-    depth=2,
-    alpha=1,                  # strength of the path penalty
+    depth=3,
+    alpha=2.5,                  # strength of the path penalty
     seed=1992,
-    t_final=20,
+    t_final=30,
     lossType="mahalanobis",    # {default, mahalanobis}
-    func="SHO",                # {LVE, SHO, PFHO}
-    figname="SHO_mahalanobis_dynamics.png",
+    func="LVE",                # {LVE, SHO, PFHO}
+    figname="LVE_mahalanobis_dynamics.png",
 )
+
+
+# ---------------------------------------- #
+# For Damped Harmonic Oscillator  
+# Hyperparams:
+# hidden_size= 4 
+# latent_size= 1 
+# width_size= 16 
+# depth= 2 
+# lr = 1e2 
+
+# ---------------------------------------- #
+# For Lotka-Volterra Equations 
+# see: https://arxiv.org/pdf/2105.03835.pdf
+# Hyperparams:
+# hidden_size= 16
+# latent_size= 8
+# width_size= 100 
+# depth= 3 
+# lr = 5e-3
+# 0.5, 0.5, 1.5, 0.5
