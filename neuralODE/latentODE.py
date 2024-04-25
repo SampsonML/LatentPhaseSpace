@@ -223,7 +223,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (0.5, 0.5, 1.5, 0.5)  # a, b, c, d
+    LVE_args = (1.5, 1.5, 2.5, 1.5)  # a, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -328,7 +328,7 @@ def main(
         d_y = jnp.array([d_prey, d_predator])
         return d_y
 
-    LVE_args = (0.5, 0.5, 1.5, 0.5)  # a=prey-growth, b, c, d
+    LVE_args = (1.5, 1.5, 2.5, 1.5)  # a=prey-growth, b, c, d
 
     # --------------------------
     # Simple harmonic oscillator
@@ -460,7 +460,7 @@ def main(
 
         if ( (step % plot_every) == 0 and (step > 0) ) or step == steps - 1:
             # create some sample trajectories
-            t_end = 40
+            t_end = 30
             ext = t_final
             sample_t = jnp.linspace(0, t_end, 300)
             sample_y = model.sample(sample_t, key=sample_key)
@@ -590,16 +590,16 @@ def main(
 main(
     n_points=150,              # number of points in the ODE data
     lr=5e-3,
-    steps=101,
-    plot_every=33,
-    save_every=33,
+    steps=1001,
+    plot_every=250,
+    save_every=250,
     hidden_size=16,
     latent_size=8,
     width_size=50,
     depth=3,
     alpha=2.5,                  # strength of the path penalty
     seed=1992,
-    t_final=30,
+    t_final=20,
     lossType="mahalanobis",    # {default, mahalanobis}
     func="LVE",                # {LVE, SHO, PFHO}
     figname="LVE_mahalanobis_dynamics.png",
@@ -608,16 +608,20 @@ main(
 
 # ---------------------------------------- #
 # For Damped Harmonic Oscillator  
+# ---------------------------------------- #
 # Hyperparams:
 # hidden_size= 4 
 # latent_size= 1 
 # width_size= 16 
 # depth= 2 
-# lr = 1e2 
+# lr = 1e2
+# theta = 0.125
+# steps = 3001
 
 # ---------------------------------------- #
 # For Lotka-Volterra Equations 
 # see: https://arxiv.org/pdf/2105.03835.pdf
+# ---------------------------------------- #
 # Hyperparams:
 # hidden_size= 16
 # latent_size= 8
