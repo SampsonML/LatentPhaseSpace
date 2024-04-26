@@ -204,6 +204,21 @@ class LatentODE(eqx.Module):
         return self._sampleLatent(ts, latent)
 
 
+    # track the path length
+    def pathLength(self, ts, ys, *, key):
+        latent, mean, std = self._latent(ts, ys, key)
+        pred_latent = self._sampleLatent(ts, latent)
+        # Mahalanobis distance between latents \sqrt{(x - y)^T \Sigma^{-1} (x - y)}
+        diff = jnp.diff(pred_latent, axis=0)
+        std_latent = self.hidden_to_latent(self.latent_to_hidden(std)) # get the latent space std
+        #std_hidden = self.latent_to_hidden(std_latent) # get the hidden space std
+        Cov = jnp.eye(diff.shape[1]) * std_latent # latent_state
+        #Cov = jnp.eye(diff.shape[1]) * std_hidden # hidden state
+        Cov = jnp.linalg.inv(Cov)
+        d_latent = jnp.sqrt(jnp.abs(jnp.sum( jnp.dot(diff , Cov) @ diff.T, axis=1)))
+        d_latent = jnp.sum(d_latent)
+        return d_latent
+
 def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
     ykey, tkey1, tkey2 = jr.split(key, 3)
     y0 = jr.uniform(ykey, (dataset_size, 2), minval=3, maxval=3)
@@ -235,7 +250,7 @@ def get_data(dataset_size, *, key, func=None, t_end=1, n_points=100):
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = (0.125)  # theta
+    SHO_args = (0.12)  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -340,7 +355,7 @@ def main(
         d_y = jnp.array([dy1, dy2])
         return d_y
 
-    SHO_args = 0.125  # theta
+    SHO_args = 0.12  # theta
 
     # --------------------------------------
     # Periodically forced hamonic oscillator
@@ -371,14 +386,14 @@ def main(
         rows = 4
         TITLE = "Latent ODE Model: Simple Harmonic Oscillator"
         LAB_X = "position"
-        LAB_Y = "pelocity"
+        LAB_Y = "velocity"
     elif func == "PFHO":
         vector_field = PFHO
         args = PFHO_args
         rows = 3
         TITLE = "Latent ODE Model: Periodically Forced Harmonic Oscillator"
-        LAB_X = "Position"
-        LAB_Y = "Velocity"
+        LAB_X = "position"
+        LAB_Y = "velocity"
     else:
         raise ValueError("func must be one of 'LVE', 'SHO', 'PFHO'")
 
@@ -439,6 +454,8 @@ def main(
     idx = 0
     f_sz = 16
     loss_vector = []
+    path_vector = []
+    mse_vec = []
     for step, (ts_i, ys_i) in zip(
         range(steps), dataloader((ts, ys), batch_size, key=loader_key)
     ):
@@ -449,6 +466,22 @@ def main(
         end = time.time()
         print(f"Step: {step}, Loss: {value}, Computation time: {end - start}")
         loss_vector.append(value)
+        # Path length calculation 
+        key_path = jr.split(train_key, 1)[0]
+        key_path = jr.split(key_path, ts_i.shape[0])
+        path_len = jax.vmap(model.pathLength)(ts=ts_i, ys=ys_i, key=key_path)
+        path_vector.append(jnp.mean(path_len))
+
+        # calculate MSE extrapolation error
+        sample_t = jnp.linspace(0, t_end, 300)
+        sample_y = model.sample(sample_t, key=sample_key)
+        sample_t = np.asarray(sample_t)
+        sample_y = np.asarray(sample_y)
+        exact_y = solve(sample_t, sample_y[0, :])
+        mse_ = (exact_y - sample_y)**2
+        mse_ = jnp.sum(mse_, axis=1)
+        mse_ = jnp.sum(mse)
+        mse_vec.append(mse_)
 
         # save parameters
         SAVE_DIR = "saved_models"
@@ -460,7 +493,7 @@ def main(
 
         if ( (step % plot_every) == 0 and (step > 0) ) or step == steps - 1:
             # create some sample trajectories
-            t_end = 30
+            t_end = 70
             ext = t_final
             sample_t = jnp.linspace(0, t_end, 300)
             sample_y = model.sample(sample_t, key=sample_key)
@@ -586,23 +619,44 @@ def main(
     figname2 = figname.replace(".png", ".pdf")
     plt.savefig(figname2, bbox_inches="tight", dpi=200)
 
+
+
+    # Plot the loss figure and interpolation error
+    fig, ax = plt.subplots(1, 2, figsize=(8, 3))
+
+    # the loss
+    ax[0].plot(mse_vec, color="black")
+    ax[0].set_xlabel("step", fontsize=f_sz)
+    ax[0].set_ylabel("MSE", fontsize=f_sz)
+
+    # the interpolation error
+    ax[1].plot(path_vector, color="firebrick")
+    ax[1].set_xlabel("step", fontsize=f_sz)
+    ax[1].set_ylabel(r"$\langle \sqrt{ (\ell_{i} - \ell_{i+1})^T \Sigma^{-1} (\ell_i - \ell_{i+1}) } \rangle$", fontsize=f_sz)
+    
+    # rename and save the figure
+    figname = figname.replace(".png", "_path.png")
+    plt.savefig(figname, bbox_inches="tight", dpi=200)
+    figname2 = figname.replace(".png", ".pdf")
+    plt.savefig(figname2, bbox_inches="tight", dpi=200)
+
 # run the code son
 main(
     n_points=150,              # number of points in the ODE data
-    lr=5e-3,
-    steps=1001,
-    plot_every=250,
-    save_every=250,
-    hidden_size=16,
-    latent_size=8,
-    width_size=50,
-    depth=3,
-    alpha=2.5,                  # strength of the path penalty
+    lr=1e-2,
+    steps=151,
+    plot_every=50,
+    save_every=50,
+    hidden_size=4,
+    latent_size=1,
+    width_size=16,
+    depth=2,
+    alpha=4,                  # strength of the path penalty
     seed=1992,
     t_final=20,
-    lossType="mahalanobis",    # {default, mahalanobis}
-    func="LVE",                # {LVE, SHO, PFHO}
-    figname="LVE_mahalanobis_dynamics.png",
+    lossType="default",    # {default, mahalanobis}
+    func="SHO",                # {LVE, SHO, PFHO}
+    figname="SHO_path_default_dynamics.png",
 )
 
 
@@ -617,6 +671,8 @@ main(
 # lr = 1e2
 # theta = 0.125
 # steps = 3001
+# ---------------------------------------- #
+
 
 # ---------------------------------------- #
 # For Lotka-Volterra Equations 
@@ -629,3 +685,4 @@ main(
 # depth= 3 
 # lr = 5e-3
 # 0.5, 0.5, 1.5, 0.5
+# ---------------------------------------- #
