@@ -473,6 +473,7 @@ def main(
         path_vector.append(jnp.mean(path_len))
 
         # calculate MSE extrapolation error
+        t_end = 60
         sample_t = jnp.linspace(0, t_end, 300)
         sample_y = model.sample(sample_t, key=sample_key)
         sample_t = np.asarray(sample_t)
@@ -480,7 +481,7 @@ def main(
         exact_y = solve(sample_t, sample_y[0, :])
         mse_ = (exact_y - sample_y)**2
         mse_ = jnp.sum(mse_, axis=1)
-        mse_ = jnp.sum(mse)
+        mse_ = jnp.sum(mse_)
         mse_vec.append(mse_)
 
         # save parameters
@@ -625,14 +626,14 @@ def main(
     fig, ax = plt.subplots(1, 2, figsize=(8, 3))
 
     # the loss
-    ax[0].plot(mse_vec, color="black")
+    ax[0].plot(mse_vec[5:-1], color="black")
     ax[0].set_xlabel("step", fontsize=f_sz)
     ax[0].set_ylabel("MSE", fontsize=f_sz)
 
     # the interpolation error
-    ax[1].plot(path_vector, color="firebrick")
+    ax[1].plot(path_vector[5:-1], color="firebrick")
     ax[1].set_xlabel("step", fontsize=f_sz)
-    ax[1].set_ylabel(r"$\langle \sqrt{ (\ell_{i} - \ell_{i+1})^T \Sigma^{-1} (\ell_i - \ell_{i+1}) } \rangle$", fontsize=f_sz)
+    ax[1].set_ylabel(r"$\langle \sum_i^{n-1} d_{M,i} \rangle$", fontsize=f_sz)
     
     # rename and save the figure
     figname = figname.replace(".png", "_path.png")
@@ -640,23 +641,29 @@ def main(
     figname2 = figname.replace(".png", ".pdf")
     plt.savefig(figname2, bbox_inches="tight", dpi=200)
 
+    # save the vectors to compare
+    filename = figname2.replace(".pdf", "_mse.npy")
+    np.save(filename, mse_vec)
+    filename = filename.replace("_mse.npy", "_path.npy")
+    np.save(filename, path_vector)
+
 # run the code son
 main(
     n_points=150,              # number of points in the ODE data
     lr=1e-2,
-    steps=151,
-    plot_every=50,
-    save_every=50,
+    steps=5001,
+    plot_every=2500,
+    save_every=2500,
     hidden_size=4,
     latent_size=1,
     width_size=16,
     depth=2,
-    alpha=4,                  # strength of the path penalty
+    alpha=2.5,                  # strength of the path penalty
     seed=1992,
     t_final=20,
-    lossType="default",    # {default, mahalanobis}
+    lossType="mahalanobis",    # {default, mahalanobis}
     func="SHO",                # {LVE, SHO, PFHO}
-    figname="SHO_path_default_dynamics.png",
+    figname="SHO_path_mahalanobis_dynamics.png",
 )
 
 
